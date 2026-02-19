@@ -1,0 +1,53 @@
+﻿<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zamówienia - Karty Produktowe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles_orders.css" />
+  <script src="auth.js"></script>
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div class="top-nav">
+        <div class="brand-block">
+          <p class="eyebrow">FARO • panel handlowy</p>
+          <strong>Zamówienia</strong>
+        </div>
+        <nav class="menu-links" aria-label="Główne menu">
+          <a href="index.html" class="menu-link">Kreator</a>
+          <a href="#" class="menu-link active">Zamówienia</a>
+          <a href="realization.html" class="menu-link">Do realizacji</a>
+        </nav>
+      </div>
+      <p>Lista zapisanych kart produktowych z możliwością podglądu, edycji, usuwania i przeniesienia do realizacji.</p>
+    </header>
+
+    <section class="panel" aria-labelledby="orders-title">
+      <h2 id="orders-title">Zapisane karty</h2>
+      <div id="ordersList" class="muted">Brak zapisanych kart.</div>
+    </section>
+
+    <div id="previewModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Podgląd karty</h2>
+          <button id="closePreviewBtn" type="button" class="btn btn-ghost">Zamknij</button>
+        </div>
+        <div id="previewContent"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <script src="app_orders.js"></script>
+</body>
+</html>
+
+
+

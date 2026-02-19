@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pl">
 <head>
   <meta charset="UTF-8" />
@@ -100,7 +100,7 @@
 <body>
   <main class="card">
     <h1>Logowanie FARO</h1>
-    <p>Podaj login i hasło, aby wejść do systemu.</p>
+    <p>Podaj login i hasĹ‚o, aby wejĹ›Ä‡ do systemu.</p>
 
     <form id="loginForm">
       <label>
@@ -108,7 +108,7 @@
         <input id="username" type="text" autocomplete="username" required />
       </label>
       <label style="margin-top:10px;">
-        Hasło
+        HasĹ‚o
         <input id="password" type="password" autocomplete="current-password" required />
       </label>
       <p id="errorMsg" class="error"></p>
@@ -126,7 +126,7 @@
       const passwordInput = document.getElementById("password");
       const errorMsg = document.getElementById("errorMsg");
       const params = new URLSearchParams(window.location.search);
-      const next = params.get("next") || "index_compact.html";
+      const next = params.get("next") || "index.html";
 
       form.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -139,9 +139,10 @@
           return;
         }
 
-        errorMsg.textContent = "Nieprawidłowy login lub hasło.";
+        errorMsg.textContent = "NieprawidĹ‚owy login lub hasĹ‚o.";
       });
     })();
   </script>
 </body>
 </html>
+

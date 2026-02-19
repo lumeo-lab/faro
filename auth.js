@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   const AUTH_KEY = "faro_auth";
   const isLoginPage = /login\.html$/i.test(window.location.pathname);
 
@@ -9,7 +9,7 @@
   if (isLoginPage) {
     if (isAuthenticated()) {
       const params = new URLSearchParams(window.location.search);
-      const next = params.get("next") || "index_compact.html";
+      const next = params.get("next") || "index.html";
       window.location.replace(next);
     }
     return;
@@ -20,3 +20,4 @@
     window.location.replace(`login.html?next=${encodeURIComponent(next)}`);
   }
 })();
+

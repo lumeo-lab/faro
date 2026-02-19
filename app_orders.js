@@ -74,7 +74,7 @@ function renderOrders() {
         <td>${formatDateTime(order.updated_at || order.created_at)}</td>
         <td>
           <button type="button" class="btn btn-primary" data-action="preview" data-id="${order.id}">Podgląd</button>
-          <a class="btn btn-primary" href="index_compact.html?edit=${encodeURIComponent(order.id)}">Edycja</a>
+          <a class="btn btn-primary" href="index.html?edit=${encodeURIComponent(order.id)}">Edycja</a>
           <button type="button" class="btn btn-accent" data-action="to-realization" data-id="${order.id}">Do realizacji</button>
           <button type="button" class="btn btn-ghost" data-action="delete" data-id="${order.id}">Usuń</button>
         </td>
@@ -220,3 +220,4 @@ previewModal.addEventListener("click", (event) => {
 });
 
 loadOrders();
+
