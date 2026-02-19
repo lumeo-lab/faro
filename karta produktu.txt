@@ -1,0 +1,33 @@
+1. Nazwa produktu
+2. Nazwa kolekcji / wzór
+3. Nr zapytania
+4. Rozmiar
+5. Składniki (nr z porowki, pudełko itp)
+6. Gramatura
+7. Konstrukcja (skład)
+8. Kolor / druk (reaktywny)
+9. Rodzaj druku (rotacja, panel)
+10. Oeko-Tex / BSCI
+11. Kod kreskowy
+12. Temperatura prania (40, 60, 90°C)
+13. Made in Green (certyfikaty)
+14. Rodzaj zapięcia (zamek, guziki, zakładki)
+15. Wykurcz ± 2%
+16. Skład (100% bawełna)
+17. Wymiar opakowania jednostkowego
+18. Waga sztuki
+19. Waga opakowania zbiorczego
+20. Rodzaj pakowania (PVC, opaska, worek itp) poduszka / kocyk
+21. Ilość w kartonie (jak pakowane: jedna sztuka w woreczku / mix kolorów)
+22. Ilość zamawiana w rozmiarze / kolorze
+23. Oczekiwana cena ??? (FOB, CIF)
+24. Termin realizacji
+25. Dla kogo ??? i ile komu
+26. Nr partii
+27. Index wewnętrzny
+28. Czy jest wszywka (gdzie)
+29. Etykieta
+30. Do kiedy ważna oferta
+31. Jakie jest MOQ
+32. Czy oznaczenia FARO
+33. Data produkcji
