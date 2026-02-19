@@ -1,30 +1,22 @@
-﻿const REALIZATION_KEY = "faro_realization_compact";
-
-const realizationListView = document.getElementById("realizationListView");
+﻿const realizationListView = document.getElementById("realizationListView");
 const realizationDetailView = document.getElementById("realizationDetailView");
 const realizationList = document.getElementById("realizationList");
 const realizationDetail = document.getElementById("realizationDetail");
 const backToListBtn = document.getElementById("backToListBtn");
 
-const viewState = {
-  selectedOrderId: null
+const state = {
+  items: [],
+  selectedOrderId: null,
+  attachments: []
 };
 
-function loadRealization() {
-  try {
-    const raw = localStorage.getItem(REALIZATION_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+function ensureSupabase() {
+  if (!window.sb) {
+    realizationList.className = "muted";
+    realizationList.textContent = "Brak połączenia z Supabase.";
+    return false;
   }
-}
-
-function saveRealization(items) {
-  localStorage.setItem(REALIZATION_KEY, JSON.stringify(items));
+  return true;
 }
 
 function formatDateTime(iso) {
@@ -58,29 +50,20 @@ function createDefaultSteps() {
 }
 
 function ensureRealizationFields(order) {
-  if (!order.realization) {
-    order.realization = {
-      status: "Nowe",
-      steps: createDefaultSteps(),
-      notes: "",
-      attachments: []
-    };
+  if (!order.realization_status) {
+    order.realization_status = "Nowe";
   }
 
-  if (!Array.isArray(order.realization.steps) || !order.realization.steps.length) {
-    order.realization.steps = createDefaultSteps();
+  if (!Array.isArray(order.realization_steps) || !order.realization_steps.length) {
+    order.realization_steps = createDefaultSteps();
   }
 
-  if (!Array.isArray(order.realization.attachments)) {
-    order.realization.attachments = [];
+  if (typeof order.realization_notes !== "string") {
+    order.realization_notes = "";
   }
 
-  if (typeof order.realization.notes !== "string") {
-    order.realization.notes = "";
-  }
-
-  if (!order.realization.status) {
-    order.realization.status = "Nowe";
+  if (!Array.isArray(order.data)) {
+    order.data = [];
   }
 }
 
@@ -99,33 +82,48 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function getOrderById(items, id) {
-  return items.find((item) => item.id === id);
+function getOrderById(id) {
+  return state.items.find((item) => item.id === id);
 }
 
-function normalizeAndSave() {
-  const items = loadRealization();
-  items.forEach(ensureRealizationFields);
-  saveRealization(items);
-  return items;
+async function loadRealization() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  const { data, error } = await window.sb
+    .from("cards")
+    .select("*")
+    .eq("stage", "realization")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    realizationList.className = "muted";
+    realizationList.textContent = `Błąd pobierania realizacji: ${error.message}`;
+    return;
+  }
+
+  state.items = Array.isArray(data) ? data : [];
+  state.items.forEach(ensureRealizationFields);
 }
 
 function openListView() {
-  viewState.selectedOrderId = null;
+  state.selectedOrderId = null;
   realizationListView.classList.remove("hidden");
   realizationDetailView.classList.add("hidden");
   renderList();
 }
 
-function openDetailView(orderId) {
-  viewState.selectedOrderId = orderId;
+async function openDetailView(orderId) {
+  state.selectedOrderId = orderId;
   realizationListView.classList.add("hidden");
   realizationDetailView.classList.remove("hidden");
+  await loadAttachments(orderId);
   renderDetail(orderId);
 }
 
 function renderList() {
-  const items = normalizeAndSave();
+  const items = state.items;
 
   if (!items.length) {
     realizationList.className = "muted";
@@ -134,17 +132,15 @@ function renderList() {
   }
 
   const rows = items
-    .slice()
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
     .map((order, index) => `
       <tr>
         <td>${index + 1}</td>
-        <td>${order.orderNo}</td>
+        <td>${order.order_no || "-"}</td>
         <td>${getProductName(order.data)}</td>
-        <td>${order.categoryName}</td>
-        <td>${order.subcategory}</td>
-        <td><span class="status-pill">${order.realization.status}</span></td>
-        <td>${formatDateTime(order.updatedAt)}</td>
+        <td>${order.category_name || "-"}</td>
+        <td>${order.subcategory || "-"}</td>
+        <td><span class="status-pill">${order.realization_status}</span></td>
+        <td>${formatDateTime(order.updated_at || order.created_at)}</td>
         <td><button type="button" class="btn btn-primary" data-action="open-detail" data-order-id="${order.id}">Wejdź</button></td>
       </tr>
     `)
@@ -172,9 +168,29 @@ function renderList() {
   `;
 }
 
+async function loadAttachments(orderId) {
+  const { data, error } = await window.sb
+    .from("card_attachments")
+    .select("*")
+    .eq("card_id", orderId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    alert(`Nie udało się pobrać załączników: ${error.message}`);
+    state.attachments = [];
+    return;
+  }
+
+  state.attachments = Array.isArray(data) ? data : [];
+}
+
+function getFileUrl(filePath) {
+  const { data } = window.sb.storage.from("card-files").getPublicUrl(filePath);
+  return data?.publicUrl || "#";
+}
+
 function renderDetail(orderId) {
-  const items = normalizeAndSave();
-  const order = getOrderById(items, orderId);
+  const order = getOrderById(orderId);
 
   if (!order) {
     openListView();
@@ -190,7 +206,7 @@ function renderDetail(orderId) {
     `)
     .join("");
 
-  const steps = (order.realization.steps || [])
+  const steps = (order.realization_steps || [])
     .map((step) => `
       <label class="step-item">
         <input type="checkbox" data-action="step" data-order-id="${order.id}" data-step-id="${step.id}" ${step.done ? "checked" : ""} />
@@ -199,13 +215,13 @@ function renderDetail(orderId) {
     `)
     .join("");
 
-  const attachments = (order.realization.attachments || [])
+  const attachments = (state.attachments || [])
     .map((file) => `
       <div class="attach-item">
-        <span>${file.name}</span>
+        <span>${file.file_name}</span>
         <div class="attach-actions">
-          <a class="btn btn-primary" href="${file.dataUrl}" download="${file.name}">Pobierz</a>
-          <button type="button" class="btn btn-ghost" data-action="remove-file" data-order-id="${order.id}" data-file-id="${file.id}">Usuń</button>
+          <a class="btn btn-primary" href="${getFileUrl(file.file_path)}" target="_blank" rel="noopener">Pobierz</a>
+          <button type="button" class="btn btn-ghost" data-action="remove-file" data-order-id="${order.id}" data-file-id="${file.id}" data-file-path="${file.file_path}">Usuń</button>
         </div>
       </div>
     `)
@@ -215,11 +231,11 @@ function renderDetail(orderId) {
     <article class="realization-card" data-order-id="${order.id}">
       <div class="card-top">
         <div>
-          <h3>${order.orderNo} • ${getProductName(order.data)}</h3>
+          <h3>${order.order_no || "-"} • ${getProductName(order.data)}</h3>
           <div class="meta">
-            <span>Kategoria: ${order.categoryName}</span>
-            <span>Podkategoria: ${order.subcategory}</span>
-            <span>Ostatnia aktualizacja: ${formatDateTime(order.updatedAt)}</span>
+            <span>Kategoria: ${order.category_name || "-"}</span>
+            <span>Podkategoria: ${order.subcategory || "-"}</span>
+            <span>Ostatnia aktualizacja: ${formatDateTime(order.updated_at || order.created_at)}</span>
           </div>
         </div>
         <div class="actions">
@@ -233,13 +249,13 @@ function renderDetail(orderId) {
           <div class="status-row">
             <label>Status zamówienia</label>
             <select data-action="status" data-order-id="${order.id}">
-              ${statusOptions(order.realization.status)}
+              ${statusOptions(order.realization_status)}
             </select>
           </div>
           <div class="steps">${steps}</div>
           <div class="status-row" style="margin-top:8px;">
             <label>Notatki realizacyjne</label>
-            <textarea data-action="notes" data-order-id="${order.id}">${escapeHtml(order.realization.notes)}</textarea>
+            <textarea data-action="notes" data-order-id="${order.id}">${escapeHtml(order.realization_notes || "")}</textarea>
           </div>
 
           <div class="attachments" style="margin-top:8px;">
@@ -260,33 +276,28 @@ function renderDetail(orderId) {
   `;
 }
 
-function persistCardFromDom(orderId) {
-  const items = loadRealization();
-  const order = getOrderById(items, orderId);
+function collectDetailPayload(orderId) {
+  const order = getOrderById(orderId);
   if (!order) {
-    return;
+    return null;
   }
-
-  ensureRealizationFields(order);
 
   const root = document.querySelector(`.realization-card[data-order-id="${orderId}"]`);
   if (!root) {
-    return;
+    return null;
   }
 
   const statusEl = root.querySelector('select[data-action="status"]');
   const notesEl = root.querySelector('textarea[data-action="notes"]');
-  if (statusEl) {
-    order.realization.status = statusEl.value;
-  }
-  if (notesEl) {
-    order.realization.notes = notesEl.value;
-  }
+  const stepsEls = root.querySelectorAll('input[data-action="step"]');
+  const paramInputs = root.querySelectorAll('input[data-action="param"]');
 
-  const stepEls = root.querySelectorAll('input[data-action="step"]');
-  order.realization.steps = Array.from(stepEls).map((el) => {
+  const realization_status = statusEl ? statusEl.value : order.realization_status;
+  const realization_notes = notesEl ? notesEl.value : order.realization_notes;
+
+  const realization_steps = Array.from(stepsEls).map((el) => {
     const stepId = el.getAttribute("data-step-id") || "step";
-    const oldStep = order.realization.steps.find((s) => s.id === stepId);
+    const oldStep = (order.realization_steps || []).find((s) => s.id === stepId);
     return {
       id: stepId,
       label: oldStep?.label || stepId,
@@ -294,27 +305,41 @@ function persistCardFromDom(orderId) {
     };
   });
 
-  const paramInputs = root.querySelectorAll('input[data-action="param"]');
+  const nextData = Array.isArray(order.data) ? [...order.data] : [];
   paramInputs.forEach((input) => {
     const idx = Number(input.getAttribute("data-param-idx"));
-    const param = (order.data || []).find((item) => Number(item.idx) === idx);
+    const param = nextData.find((item) => Number(item.idx) === idx);
     if (param) {
       const nextValue = input.value.trim();
       param.value = nextValue || "-";
     }
   });
 
-  order.updatedAt = new Date().toISOString();
-  saveRealization(items);
+  return { realization_status, realization_notes, realization_steps, data: nextData };
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+async function saveDetail(orderId) {
+  const payload = collectDetailPayload(orderId);
+  if (!payload) {
+    return;
+  }
+
+  const { error } = await window.sb
+    .from("cards")
+    .update(payload)
+    .eq("id", orderId);
+
+  if (error) {
+    alert(`Nie udało się zapisać karty realizacji: ${error.message}`);
+    return;
+  }
+
+  await loadRealization();
+  renderDetail(orderId);
+}
+
+function toSafePathPart(name) {
+  return name.replace(/[^a-zA-Z0-9._-]+/g, "-");
 }
 
 async function uploadFiles(orderId, files) {
@@ -322,46 +347,62 @@ async function uploadFiles(orderId, files) {
     return;
   }
 
-  const items = loadRealization();
-  const order = getOrderById(items, orderId);
-  if (!order) {
-    return;
-  }
-
-  ensureRealizationFields(order);
-
   for (const file of files) {
-    const dataUrl = await readFileAsDataUrl(file);
-    order.realization.attachments.push({
-      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      dataUrl,
-      uploadedAt: new Date().toISOString()
-    });
+    const path = `${orderId}/${Date.now()}-${toSafePathPart(file.name)}`;
+
+    const { error: uploadError } = await window.sb.storage
+      .from("card-files")
+      .upload(path, file);
+
+    if (uploadError) {
+      alert(`Błąd uploadu pliku ${file.name}: ${uploadError.message}`);
+      continue;
+    }
+
+    const { error: insertError } = await window.sb
+      .from("card_attachments")
+      .insert({
+        card_id: orderId,
+        file_name: file.name,
+        file_path: path,
+        mime_type: file.type,
+        size_bytes: file.size
+      });
+
+    if (insertError) {
+      alert(`Plik wysłany, ale nie zapisano metadanych: ${insertError.message}`);
+    }
   }
 
-  order.updatedAt = new Date().toISOString();
-  saveRealization(items);
+  await loadAttachments(orderId);
+  await loadRealization();
   renderDetail(orderId);
 }
 
-function removeAttachment(orderId, fileId) {
-  const items = loadRealization();
-  const order = getOrderById(items, orderId);
-  if (!order) {
+async function removeAttachment(orderId, fileId, filePath) {
+  const { error: storageError } = await window.sb.storage
+    .from("card-files")
+    .remove([filePath]);
+
+  if (storageError) {
+    alert(`Nie udało się usunąć pliku z bucketu: ${storageError.message}`);
+  }
+
+  const { error: dbError } = await window.sb
+    .from("card_attachments")
+    .delete()
+    .eq("id", fileId);
+
+  if (dbError) {
+    alert(`Nie udało się usunąć metadanych pliku: ${dbError.message}`);
     return;
   }
 
-  ensureRealizationFields(order);
-  order.realization.attachments = order.realization.attachments.filter((file) => file.id !== fileId);
-  order.updatedAt = new Date().toISOString();
-  saveRealization(items);
+  await loadAttachments(orderId);
   renderDetail(orderId);
 }
 
-realizationList.addEventListener("click", (event) => {
+realizationList.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -372,11 +413,11 @@ realizationList.addEventListener("click", (event) => {
   }
 
   if (button.dataset.action === "open-detail" && button.dataset.orderId) {
-    openDetailView(button.dataset.orderId);
+    await openDetailView(button.dataset.orderId);
   }
 });
 
-realizationDetail.addEventListener("click", (event) => {
+realizationDetail.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -394,15 +435,15 @@ realizationDetail.addEventListener("click", (event) => {
   }
 
   if (action === "save-card") {
-    persistCardFromDom(orderId);
-    renderDetail(orderId);
+    await saveDetail(orderId);
     return;
   }
 
   if (action === "remove-file") {
     const fileId = button.dataset.fileId;
-    if (fileId) {
-      removeAttachment(orderId, fileId);
+    const filePath = button.dataset.filePath;
+    if (fileId && filePath) {
+      await removeAttachment(orderId, fileId, filePath);
     }
   }
 });
@@ -422,27 +463,18 @@ realizationDetail.addEventListener("change", async (event) => {
     const files = Array.from(target.files);
     await uploadFiles(orderId, files);
     target.value = "";
-    return;
-  }
-
-  const orderId = target.getAttribute("data-order-id");
-  if (orderId) {
-    persistCardFromDom(orderId);
-  }
-});
-
-realizationDetail.addEventListener("input", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-
-  const orderId = target.getAttribute("data-order-id");
-  if (orderId) {
-    persistCardFromDom(orderId);
   }
 });
 
 backToListBtn.addEventListener("click", openListView);
 
-openListView();
+async function init() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  await loadRealization();
+  openListView();
+}
+
+init();

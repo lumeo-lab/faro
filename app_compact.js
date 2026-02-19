@@ -87,14 +87,12 @@ const parameterDefinitions = [...handlowiecParameters, ...importParameters].map(
   required: index < handlowiecParameters.length
 }));
 
-const STORAGE_KEY = "faro_orders_compact";
-
 const state = {
   category: null,
   subcategory: null,
   lastGeneratedData: null,
-  orders: [],
-  editingOrderId: null
+  editingOrderId: null,
+  editingOrderNo: null
 };
 
 const categoryGrid = document.getElementById("categoryGrid");
@@ -110,6 +108,14 @@ const exportPdfBtn = document.getElementById("exportPdfBtn");
 const resetBtn = document.getElementById("resetBtn");
 const summary = document.getElementById("summary");
 
+function ensureSupabase() {
+  if (!window.sb) {
+    alert("Brak połączenia z Supabase. Sprawdź konfigurację supabase-client.js.");
+    return false;
+  }
+  return true;
+}
+
 function createCard(text, desc, selected, onClick) {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -117,24 +123,6 @@ function createCard(text, desc, selected, onClick) {
   btn.innerHTML = `<strong>${text}</strong><span>${desc}</span>`;
   btn.addEventListener("click", onClick);
   return btn;
-}
-
-function loadOrders() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      state.orders = [];
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    state.orders = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    state.orders = [];
-  }
-}
-
-function saveOrders() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.orders));
 }
 
 function updateSaveButtonLabel() {
@@ -153,6 +141,7 @@ function renderCategories() {
         state.subcategory = null;
         state.lastGeneratedData = null;
         state.editingOrderId = null;
+        state.editingOrderNo = null;
         updateSaveButtonLabel();
         renderCategories();
         renderSubcategories();
@@ -182,6 +171,7 @@ function renderSubcategories() {
         state.subcategory = name;
         state.lastGeneratedData = null;
         state.editingOrderId = null;
+        state.editingOrderNo = null;
         updateSaveButtonLabel();
         renderSubcategories();
         renderForm();
@@ -311,6 +301,7 @@ function renderSummary(data) {
   summary.classList.remove("muted");
   summary.innerHTML = `
     <div class="summary-head">
+      <p><strong>Nr zamówienia:</strong> ${state.editingOrderNo || "Nowe"}</p>
       <p><strong>Kategoria:</strong> ${state.category.name}</p>
       <p><strong>Podkategoria:</strong> ${state.subcategory}</p>
       <p><strong>Tryb:</strong> ${state.editingOrderId ? "Edycja" : "Nowa karta"}</p>
@@ -337,7 +328,18 @@ function sanitizeFilename(value) {
     .slice(0, 60);
 }
 
-function upsertOrderFromCurrentForm() {
+function generateOrderNo() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+  const rand = Math.floor(100 + Math.random() * 900);
+  return `ZAM-${stamp}-${rand}`;
+}
+
+async function upsertOrderFromCurrentForm() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
   if (!state.category || !state.subcategory) {
     alert("Najpierw wybierz kategorię i podkategorię.");
     return;
@@ -347,71 +349,95 @@ function upsertOrderFromCurrentForm() {
   state.lastGeneratedData = data;
   renderSummary(data);
 
-  const nowIso = new Date().toISOString();
+  const payload = {
+    category_id: state.category.id,
+    category_name: state.category.name,
+    subcategory: state.subcategory,
+    data
+  };
 
   if (state.editingOrderId) {
-    const idx = state.orders.findIndex((item) => item.id === state.editingOrderId);
-    if (idx >= 0) {
-      state.orders[idx] = {
-        ...state.orders[idx],
-        categoryId: state.category.id,
-        categoryName: state.category.name,
-        subcategory: state.subcategory,
-        data,
-        updatedAt: nowIso
-      };
+    const { error } = await window.sb
+      .from("cards")
+      .update(payload)
+      .eq("id", state.editingOrderId);
+
+    if (error) {
+      alert(`Nie udało się zapisać zmian: ${error.message}`);
+      return;
     }
   } else {
-    const nextNo = state.orders.length + 1;
-    const id = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    state.orders.push({
-      id,
-      orderNo: `ZAM-${String(nextNo).padStart(4, "0")}`,
-      categoryId: state.category.id,
-      categoryName: state.category.name,
-      subcategory: state.subcategory,
-      data,
-      createdAt: nowIso,
-      updatedAt: nowIso
-    });
-    state.editingOrderId = id;
+    const orderNo = generateOrderNo();
+    const { data: inserted, error } = await window.sb
+      .from("cards")
+      .insert({
+        ...payload,
+        order_no: orderNo,
+        stage: "orders",
+        realization_status: "Nowe",
+        realization_steps: [],
+        realization_notes: ""
+      })
+      .select("id, order_no")
+      .single();
+
+    if (error) {
+      alert(`Nie udało się zapisać karty: ${error.message}`);
+      return;
+    }
+
+    state.editingOrderId = inserted.id;
+    state.editingOrderNo = inserted.order_no;
   }
 
-  saveOrders();
   updateSaveButtonLabel();
   exportBtn.disabled = false;
-  alert("Karta została zapisana. Znajdziesz ją w podstronie Zamówienia.");
+  exportPdfBtn.disabled = false;
+  alert("Karta została zapisana w bazie. Znajdziesz ją w podstronie Zamówienia.");
 }
 
-function applyEditFromQuery() {
+async function applyEditFromQuery() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("edit");
   if (!editId) {
     return;
   }
 
-  const order = state.orders.find((item) => item.id === editId);
-  if (!order) {
+  const { data: order, error } = await window.sb
+    .from("cards")
+    .select("*")
+    .eq("id", editId)
+    .single();
+
+  if (error || !order) {
+    alert("Nie znaleziono zamówienia do edycji.");
     return;
   }
 
-  const category = categoryData.find((item) => item.id === order.categoryId);
+  const category = categoryData.find((item) => item.id === order.category_id);
   if (!category) {
+    alert("Kategoria zamówienia nie istnieje w aktualnym słowniku.");
     return;
   }
 
   state.category = category;
   state.subcategory = order.subcategory;
-  state.lastGeneratedData = order.data;
+  state.lastGeneratedData = Array.isArray(order.data) ? order.data : [];
   state.editingOrderId = order.id;
+  state.editingOrderNo = order.order_no;
 
   renderCategories();
   renderSubcategories();
   renderForm();
-  setFormData(order.data);
-  renderSummary(order.data);
+  setFormData(state.lastGeneratedData);
+  renderSummary(state.lastGeneratedData);
   updateSaveButtonLabel();
   exportBtn.disabled = false;
+  exportPdfBtn.disabled = false;
 }
 
 function exportToExcel() {
@@ -428,6 +454,7 @@ function exportToExcel() {
   const datePart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const aoa = [
     ["Karta produktowa FARO - Compact"],
+    ["Nr zamówienia", state.editingOrderNo || "Nowe"],
     ["Kategoria", state.category.name],
     ["Podkategoria", state.subcategory],
     ["Data wygenerowania", datePart],
@@ -441,7 +468,7 @@ function exportToExcel() {
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 50 }, { wch: 38 }, { wch: 18 }];
+  ws["!cols"] = [{ wch: 50 }, { wch: 38 }, { wch: 22 }];
   XLSX.utils.book_append_sheet(wb, ws, "Karta Compact");
 
   const fileBase = sanitizeFilename(`${state.category.name}-${state.subcategory}-compact`) || "karta-produktowa-compact";
@@ -466,9 +493,10 @@ function exportToPdf() {
   doc.setFontSize(14);
   doc.text("Karta produktowa FARO - Compact", 40, 38);
   doc.setFontSize(10);
-  doc.text(`Kategoria: ${state.category.name}`, 40, 58);
-  doc.text(`Podkategoria: ${state.subcategory}`, 40, 74);
-  doc.text(`Data wygenerowania: ${datePart}`, 40, 90);
+  doc.text(`Nr zamówienia: ${state.editingOrderNo || "Nowe"}`, 40, 58);
+  doc.text(`Kategoria: ${state.category.name}`, 40, 74);
+  doc.text(`Podkategoria: ${state.subcategory}`, 40, 90);
+  doc.text(`Data wygenerowania: ${datePart}`, 40, 106);
 
   const body = state.lastGeneratedData.map((item) => [
     item.label,
@@ -477,7 +505,7 @@ function exportToPdf() {
   ]);
 
   doc.autoTable({
-    startY: 106,
+    startY: 122,
     head: [["Parametr", "Wartość", "Sekcja"]],
     body,
     styles: { fontSize: 9, cellPadding: 4, overflow: "linebreak" },
@@ -501,8 +529,8 @@ generateBtn.addEventListener("click", () => {
   exportPdfBtn.disabled = false;
 });
 
-saveBtn.addEventListener("click", () => {
-  upsertOrderFromCurrentForm();
+saveBtn.addEventListener("click", async () => {
+  await upsertOrderFromCurrentForm();
 });
 
 exportBtn.addEventListener("click", () => {
@@ -518,17 +546,26 @@ resetBtn.addEventListener("click", () => {
   state.subcategory = null;
   state.lastGeneratedData = null;
   state.editingOrderId = null;
+  state.editingOrderNo = null;
   updateSaveButtonLabel();
   clearSummary();
+  exportBtn.disabled = true;
   exportPdfBtn.disabled = true;
   renderCategories();
   renderSubcategories();
   renderForm();
 });
 
-loadOrders();
-renderCategories();
-renderSubcategories();
-renderForm();
-updateSaveButtonLabel();
-applyEditFromQuery();
+async function init() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  renderCategories();
+  renderSubcategories();
+  renderForm();
+  updateSaveButtonLabel();
+  await applyEditFromQuery();
+}
+
+init();

@@ -1,42 +1,19 @@
-﻿const STORAGE_KEY = "faro_orders_compact";
-const REALIZATION_KEY = "faro_realization_compact";
-const ordersList = document.getElementById("ordersList");
+﻿const ordersList = document.getElementById("ordersList");
 const previewModal = document.getElementById("previewModal");
 const previewContent = document.getElementById("previewContent");
 const closePreviewBtn = document.getElementById("closePreviewBtn");
 
-function loadOrders() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+const state = {
+  orders: []
+};
+
+function ensureSupabase() {
+  if (!window.sb) {
+    ordersList.className = "muted";
+    ordersList.textContent = "Brak połączenia z Supabase.";
+    return false;
   }
-}
-
-function saveOrders(orders) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
-}
-
-function loadRealization() {
-  try {
-    const raw = localStorage.getItem(REALIZATION_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRealization(items) {
-  localStorage.setItem(REALIZATION_KEY, JSON.stringify(items));
+  return true;
 }
 
 function formatDateTime(iso) {
@@ -56,8 +33,30 @@ function getProductName(data) {
   return row?.value && row.value !== "-" ? row.value : "-";
 }
 
+async function loadOrders() {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  const { data, error } = await window.sb
+    .from("cards")
+    .select("*")
+    .eq("stage", "orders")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    ordersList.className = "muted";
+    ordersList.textContent = `Błąd pobierania zamówień: ${error.message}`;
+    return;
+  }
+
+  state.orders = Array.isArray(data) ? data : [];
+  renderOrders();
+}
+
 function renderOrders() {
-  const orders = loadOrders();
+  const orders = state.orders;
+
   if (!orders.length) {
     ordersList.className = "muted";
     ordersList.textContent = "Brak zapisanych kart.";
@@ -65,16 +64,14 @@ function renderOrders() {
   }
 
   const rows = orders
-    .slice()
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
     .map((order, index) => `
       <tr>
         <td>${index + 1}</td>
-        <td>${order.orderNo}</td>
+        <td>${order.order_no || "-"}</td>
         <td>${getProductName(order.data)}</td>
-        <td>${order.categoryName}</td>
-        <td>${order.subcategory}</td>
-        <td>${formatDateTime(order.updatedAt)}</td>
+        <td>${order.category_name || "-"}</td>
+        <td>${order.subcategory || "-"}</td>
+        <td>${formatDateTime(order.updated_at || order.created_at)}</td>
         <td>
           <button type="button" class="btn btn-primary" data-action="preview" data-id="${order.id}">Podgląd</button>
           <a class="btn btn-primary" href="index_compact.html?edit=${encodeURIComponent(order.id)}">Edycja</a>
@@ -113,10 +110,10 @@ function openPreview(order) {
 
   previewContent.innerHTML = `
     <div class="meta">
-      <p><strong>Nr zamówienia:</strong> ${order.orderNo}</p>
-      <p><strong>Kategoria:</strong> ${order.categoryName}</p>
-      <p><strong>Podkategoria:</strong> ${order.subcategory}</p>
-      <p><strong>Aktualizacja:</strong> ${formatDateTime(order.updatedAt)}</p>
+      <p><strong>Nr zamówienia:</strong> ${order.order_no || "-"}</p>
+      <p><strong>Kategoria:</strong> ${order.category_name || "-"}</p>
+      <p><strong>Podkategoria:</strong> ${order.subcategory || "-"}</p>
+      <p><strong>Aktualizacja:</strong> ${formatDateTime(order.updated_at || order.created_at)}</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -134,59 +131,71 @@ function closePreview() {
   previewModal.setAttribute("aria-hidden", "true");
 }
 
-function moveToRealization(id) {
-  const orders = loadOrders();
-  const order = orders.find((item) => item.id === id);
-  if (!order) {
-    return;
-  }
-
-  const nextOrders = orders.filter((item) => item.id !== id);
-  const realization = loadRealization();
-
-  const defaultSteps = [
+function createDefaultSteps() {
+  return [
     { id: "potwierdzenie", label: "Potwierdzenie zamówienia", done: false },
     { id: "probki", label: "Weryfikacja próbek", done: false },
     { id: "produkcja", label: "Produkcja", done: false },
     { id: "inspekcja", label: "Inspekcja jakości", done: false },
     { id: "wysylka", label: "Wysyłka / dokumenty", done: false }
   ];
-
-  realization.push({
-    ...order,
-    movedToRealizationAt: new Date().toISOString(),
-    realization: {
-      status: "Nowe",
-      steps: defaultSteps,
-      notes: "",
-      attachments: []
-    }
-  });
-
-  saveOrders(nextOrders);
-  saveRealization(realization);
-  renderOrders();
 }
 
-ordersList.addEventListener("click", (event) => {
+async function moveToRealization(id) {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  const { error } = await window.sb
+    .from("cards")
+    .update({
+      stage: "realization",
+      realization_status: "Nowe",
+      realization_steps: createDefaultSteps(),
+      realization_notes: ""
+    })
+    .eq("id", id);
+
+  if (error) {
+    alert(`Nie udało się przenieść do realizacji: ${error.message}`);
+    return;
+  }
+
+  await loadOrders();
+}
+
+async function deleteOrder(id) {
+  if (!ensureSupabase()) {
+    return;
+  }
+
+  const { error } = await window.sb
+    .from("cards")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    alert(`Nie udało się usunąć zamówienia: ${error.message}`);
+    return;
+  }
+
+  await loadOrders();
+}
+
+ordersList.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) {
     return;
   }
 
   const action = target.dataset.action;
-  if (!action) {
-    return;
-  }
-
   const id = target.dataset.id;
-  if (!id) {
+  if (!action || !id) {
     return;
   }
 
   if (action === "preview") {
-    const orders = loadOrders();
-    const order = orders.find((item) => item.id === id);
+    const order = state.orders.find((item) => item.id === id);
     if (order) {
       openPreview(order);
     }
@@ -194,15 +203,12 @@ ordersList.addEventListener("click", (event) => {
   }
 
   if (action === "delete") {
-    const orders = loadOrders();
-    const nextOrders = orders.filter((item) => item.id !== id);
-    saveOrders(nextOrders);
-    renderOrders();
+    await deleteOrder(id);
     return;
   }
 
   if (action === "to-realization") {
-    moveToRealization(id);
+    await moveToRealization(id);
   }
 });
 
@@ -213,4 +219,4 @@ previewModal.addEventListener("click", (event) => {
   }
 });
 
-renderOrders();
+loadOrders();
